@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitLab Scanner</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="app">
+        <!-- Login View -->
+        <div id="login-view" class="view active split-screen-login">
+            <div class="login-left">
+                <div class="login-brand">
+                    <img src="/static/images/logo.png" alt="Asset Telematics Logo" class="brand-logo" style="height: 40px; width: auto; object-fit: contain;">
+                    <span class="brand-name" style="margin-left: 12px;">Asset Telematics</span>
+                </div>
+                
+                <div class="login-form-container">
+                    <h1 class="login-heading">Holla,<br>Welcome Back</h1>
+                    <p class="login-subtext">Asset Telematics Private Limited</p>
+                    
+                    <button id="btn-login" class="btn-sso">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sso-icon"><path d="m22 13.29-3.33-10a.42.42 0 0 0-.14-.18.38.38 0 0 0-.22-.11.39.39 0 0 0-.23.07.42.42 0 0 0-.14.18l-2.26 6.67H8.32L6.1 3.26a.42.42 0 0 0-.1-.18.38.38 0 0 0-.26-.08.39.39 0 0 0-.23.07.42.42 0 0 0-.14.18L2 13.29a.74.74 0 0 0 .27.83L12 21l9.69-6.88a.71.71 0 0 0 .31-.83Z"/></svg>
+                        Sign in with GitLab
+                    </button>
+                    
+                    <div class="login-footer">
+                        Don't have an account? <span class="action-link">Contact IT</span>
+                    </div>
+                </div>
+            </div>
+            <div class="login-right">
+                <div class="login-illustration" style="background-image: url('/static/images/login_illustration_dark.jpg')"></div>
+            </div>
+        </div>
+
+        <!-- Dashboard View -->
+        <div id="dashboard-view" class="view">
+            <header class="top-nav">
+                <div class="nav-brand">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="logo-icon-small"><path d="m9 18 6-6-6-6"/></svg>
+                    <span>GitLab Scanner</span>
+                </div>
+                <div class="user-profile">
+                    <span id="user-name"></span>
+                    <img id="user-avatar" src="" alt="Avatar">
+                    <a href="/auth/logout" class="btn-icon" title="Logout">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+                    </a>
+                </div>
+            </header>
+
+            <div class="dashboard-layout">
+                <aside class="sidebar">
+                    <div class="sidebar-header">
+                        <h3>Your Groups</h3>
+                    </div>
+                    <div class="sidebar-search">
+                        <input type="text" id="group-search" class="input" placeholder="Search groups...">
+                    </div>
+                    <ul id="group-list" class="group-list">
+                        <!-- Populated by JS -->
+                    </ul>
+                    <div id="groups-loading" style="padding: 1rem; color: var(--color-muted-foreground); text-align: center;">Loading groups...</div>
+                </aside>
+
+                <main class="dashboard-content">
+                    <div class="card scan-panel">
+                        <h2>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                            New Scan
+                        </h2>
+                        <div id="no-group-selected" style="margin-bottom: 1.5rem; color: var(--color-muted-foreground);">
+                            Please select a group from the sidebar to view its repositories.
+                        </div>
+                        <form id="scan-form" class="hidden">
+                            <div class="form-group">
+                                <label>Repositories to Scan</label>
+                                <div class="project-list-container">
+                                    <div class="project-item select-all-container">
+                                        <input type="checkbox" id="select-all-projects">
+                                        <label for="select-all-projects">Select All</label>
+                                    </div>
+                                    <div id="projects-list">
+                                        <!-- Populated by JS -->
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="keywords">Keywords (comma separated)</label>
+                                <textarea id="keywords" class="input" placeholder="e.g. /api/v1/auth, /deprecated-endpoint" required></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="branch">Branch (optional, defaults to primary)</label>
+                                <input type="text" id="branch" class="input" placeholder="e.g. main, develop">
+                            </div>
+                            <button type="submit" id="btn-scan" class="btn btn-primary">Start Scan</button>
+                        </form>
+                    </div>
+
+                <div id="loading-state" class="hidden">
+                    <div class="spinner"></div>
+                    <p>Scanning repositories. This process may take several minutes...</p>
+                </div>
+
+                <div id="results-panel" class="results-panel hidden">
+                    <div class="results-header">
+                        <h2>Scan Results</h2>
+                        <button id="btn-export" class="btn btn-secondary">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                            Export PDF
+                        </button>
+                    </div>
+                    <div class="card table-container">
+                        <table id="results-table">
+                            <thead>
+                                <tr>
+                                    <th>Project</th>
+                                    <th>Keyword</th>
+                                    <th>Context Snippet</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="results-body">
+                                <!-- Results populated via JS -->
+                            </tbody>
+                        </table>
+                        <div id="no-results" class="hidden">
+                            <p>No matches found in the specified group.</p>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+</div>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

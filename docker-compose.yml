@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  gitlab-scanner:
+    build: .
+    container_name: gitlab-scanner
+    ports:
+      - "5050:5050"
+    env_file:
+      - .env
+    environment:
+      - DB_PATH=/data/gitlab-scan.db
+    volumes:
+      - gitlab-scan-data:/data
+
+volumes:
+  gitlab-scan-data:
