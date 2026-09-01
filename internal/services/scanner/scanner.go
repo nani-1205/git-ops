@@ -116,7 +116,7 @@ func ScanProjects(projectIDs []int, keywords []string, branch string, token stri
 	var wg sync.WaitGroup
 
 	// Limit concurrency to avoid hitting rate limits or overwhelming the server
-	sem := make(chan struct{}, 15)
+	sem := make(chan struct{}, 50)
 
 	for _, pid := range projectIDs {
 		wg.Add(1)
@@ -126,14 +126,9 @@ func ScanProjects(projectIDs []int, keywords []string, branch string, token stri
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			// Get project to get web URL and namespace
-			project, _, err := client.Projects.GetProject(pid, nil)
-			if err != nil {
-				// skip projects we can't fetch
-				return
-			}
-
+			var project *gitlab.Project
 			var localResults []ScanResult
+			
 			for _, keyword := range keywords {
 				searchOpt := &gitlab.SearchOptions{
 					ListOptions: gitlab.ListOptions{PerPage: 100, Page: 1},
@@ -143,9 +138,18 @@ func ScanProjects(projectIDs []int, keywords []string, branch string, token stri
 				}
 
 				for {
-					blobs, searchResp, err := client.Search.BlobsByProject(project.ID, keyword, searchOpt)
+					blobs, searchResp, err := client.Search.BlobsByProject(pid, keyword, searchOpt)
 					if err != nil {
 						break
+					}
+
+					// Only fetch project details if we found at least one match, saving API calls!
+					if len(blobs) > 0 && project == nil {
+						proj, _, pErr := client.Projects.GetProject(pid, nil)
+						if pErr != nil {
+							break // Can't construct result without project details
+						}
+						project = proj
 					}
 
 					for _, blob := range blobs {
@@ -171,9 +175,11 @@ func ScanProjects(projectIDs []int, keywords []string, branch string, token stri
 				}
 			}
 
-			mu.Lock()
-			allResults = append(allResults, localResults...)
-			mu.Unlock()
+			if len(localResults) > 0 {
+				mu.Lock()
+				allResults = append(allResults, localResults...)
+				mu.Unlock()
+			}
 		}(pid)
 	}
 

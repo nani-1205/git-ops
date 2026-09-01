@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -48,27 +49,78 @@ func ScanHandler(c *gin.Context) {
 		keywordsList[i] = strings.TrimSpace(keywordsList[i])
 	}
 
-	results, err := scanner.ScanProjects(req.ProjectIDs, keywordsList, req.Branch, token)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Scan failed: " + err.Error()})
+	// Create job in DB
+	job := models.ScanJob{
+		Status: "running",
+	}
+	if err := repository.DB.Create(&job).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create job"})
 		return
 	}
 
-	// Save history (save the first project ID as a reference or a joined string)
-	var groupIDStr string
-	if len(req.ProjectIDs) > 0 {
-		groupIDStr = fmt.Sprintf("projects-%d", len(req.ProjectIDs))
-	}
-	history := models.ScanHistory{
-		UserID:     userID,
-		GroupID:    groupIDStr,
-		Keywords:   req.Keywords,
-		Branch:     req.Branch,
-		MatchCount: len(results),
-	}
-	repository.DB.Create(&history)
+	go func(jobID uint, projectIDs []int, keywords []string, branch string, token string, uID uint) {
+		results, scanErr := scanner.ScanProjects(projectIDs, keywords, branch, token)
 
-	c.JSON(http.StatusOK, gin.H{"results": results})
+		var update models.ScanJob
+		if dbErr := repository.DB.First(&update, jobID).Error; dbErr == nil {
+			if scanErr != nil {
+				update.Status = "failed"
+				update.ErrorMessage = scanErr.Error()
+			} else {
+				update.Status = "completed"
+				if resultsJSON, jErr := json.Marshal(results); jErr == nil {
+					update.Results = string(resultsJSON)
+				}
+			}
+			repository.DB.Save(&update)
+		}
+
+		if scanErr == nil {
+			// Save history
+			var groupIDStr string
+			if len(projectIDs) > 0 {
+				groupIDStr = fmt.Sprintf("projects-%d", len(projectIDs))
+			}
+			history := models.ScanHistory{
+				UserID:     uID,
+				GroupID:    groupIDStr,
+				Keywords:   strings.Join(keywords, ","),
+				Branch:     branch,
+				MatchCount: len(results),
+			}
+			repository.DB.Create(&history)
+		}
+
+	}(job.ID, req.ProjectIDs, keywordsList, req.Branch, token, userID)
+
+	c.JSON(http.StatusOK, gin.H{"job_id": job.ID})
+}
+
+func JobStatusHandler(c *gin.Context) {
+	jobID := c.Param("id")
+	var job models.ScanJob
+	if err := repository.DB.First(&job, jobID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
+		return
+	}
+
+	if job.Status == "completed" {
+		var results []scanner.ScanResult
+		json.Unmarshal([]byte(job.Results), &results)
+		c.JSON(http.StatusOK, gin.H{
+			"status":  job.Status,
+			"results": results,
+		})
+	} else if job.Status == "failed" {
+		c.JSON(http.StatusOK, gin.H{
+			"status": job.Status,
+			"error":  job.ErrorMessage,
+		})
+	} else {
+		c.JSON(http.StatusOK, gin.H{
+			"status": job.Status,
+		})
+	}
 }
 
 type ExportRequest struct {

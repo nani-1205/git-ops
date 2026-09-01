@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 
@@ -15,11 +16,30 @@ import (
 
 func main() {
 	config.Load()
-	dbPath := os.Getenv("DB_PATH")
-	if dbPath == "" {
-		dbPath = "gitlab-scan.db"
+	
+	dbHost := os.Getenv("DB_HOST")
+	if dbHost == "" {
+		dbHost = "localhost"
 	}
-	repository.InitDB(dbPath)
+	dbPort := os.Getenv("DB_PORT")
+	if dbPort == "" {
+		dbPort = "5433"
+	}
+	dbUser := os.Getenv("DB_USER")
+	if dbUser == "" {
+		dbUser = "scanner"
+	}
+	dbPassword := os.Getenv("DB_PASSWORD")
+	if dbPassword == "" {
+		dbPassword = "scanner_password"
+	}
+	dbName := os.Getenv("DB_NAME")
+	if dbName == "" {
+		dbName = "scanner_db"
+	}
+
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=UTC", dbHost, dbUser, dbPassword, dbName, dbPort)
+	repository.InitDB(dsn)
 
 	r := gin.Default()
 
@@ -51,6 +71,7 @@ func main() {
 		api.GET("/groups", handlers.ListGroupsHandler)
 		api.GET("/groups/:id/projects", handlers.ListGroupProjectsHandler)
 		api.POST("/scan", handlers.ScanHandler)
+		api.GET("/scan/:id", handlers.JobStatusHandler)
 		api.POST("/export", handlers.ExportPDFHandler)
 	}
 

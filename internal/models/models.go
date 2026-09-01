@@ -20,3 +20,11 @@ type ScanHistory struct {
 	Branch     string
 	MatchCount int
 }
+
+type ScanJob struct {
+	gorm.Model
+	Status       string `gorm:"default:'pending'"` // pending, running, completed, failed
+	Results      string `gorm:"type:text"`         // JSON serialized results
+	ErrorMessage string `gorm:"type:text"`
+	GroupID      string
+}

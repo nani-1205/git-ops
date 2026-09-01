@@ -3,15 +3,44 @@ version: '3.8'
 services:
   gitlab-scanner:
     build: .
-    container_name: gitlab-scanner
-    ports:
-      - "5050:5050"
     env_file:
       - .env
     environment:
-      - DB_PATH=/data/gitlab-scan.db
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=scanner
+      - DB_PASSWORD=scanner_password
+      - DB_NAME=scanner_db
+    depends_on:
+      db:
+        condition: service_healthy
+    deploy:
+      replicas: 3
+
+  db:
+    image: postgres:18-alpine
+    environment:
+      - POSTGRES_USER=scanner
+      - POSTGRES_PASSWORD=scanner_password
+      - POSTGRES_DB=scanner_db
+    ports:
+      - "5433:5432"
     volumes:
-      - gitlab-scan-data:/data
+      - db_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scanner -d scanner_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "5050:5050"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - gitlab-scanner
 
 volumes:
-  gitlab-scan-data:
+  db_data:

@@ -5,7 +5,7 @@ import (
 
 	"gitlab-code-scan/internal/models"
 
-	"github.com/glebarez/sqlite"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -13,13 +13,13 @@ var DB *gorm.DB
 
 func InitDB(dsn string) {
 	var err error
-	DB, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
 	// Migrate the schema
-	err = DB.AutoMigrate(&models.User{}, &models.ScanHistory{})
+	err = DB.AutoMigrate(&models.User{}, &models.ScanHistory{}, &models.ScanJob{})
 	if err != nil {
 		log.Fatalf("Failed to migrate database schema: %v", err)
 	}

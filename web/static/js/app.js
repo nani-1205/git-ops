@@ -333,12 +333,17 @@ document.addEventListener('DOMContentLoaded', () => {
             return response.json();
         })
         .then(data => {
-            lastScanResults = data.results || [];
-            scanForm.querySelector('button').disabled = false;
-            loadingState.classList.add('hidden');
-            resultsPanel.classList.remove('hidden');
-            
-            renderResults(lastScanResults);
+            if (data.job_id) {
+                const p = loadingState.querySelector('p');
+                if (p) p.textContent = 'Scanning... Job ID: ' + data.job_id;
+                pollJobStatus(data.job_id);
+            } else {
+                lastScanResults = data.results || [];
+                scanForm.querySelector('button').disabled = false;
+                loadingState.classList.add('hidden');
+                resultsPanel.classList.remove('hidden');
+                renderResults(lastScanResults);
+            }
         })
         .catch(error => {
             scanForm.querySelector('button').disabled = false;
@@ -346,6 +351,31 @@ document.addEventListener('DOMContentLoaded', () => {
             alert('Scan failed: ' + error.message);
         });
     });
+
+    function pollJobStatus(jobId) {
+        fetch('/api/scan/' + jobId)
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'completed') {
+                    lastScanResults = data.results || [];
+                    scanForm.querySelector('button').disabled = false;
+                    loadingState.classList.add('hidden');
+                    resultsPanel.classList.remove('hidden');
+                    renderResults(lastScanResults);
+                } else if (data.status === 'failed') {
+                    scanForm.querySelector('button').disabled = false;
+                    loadingState.classList.add('hidden');
+                    alert('Scan failed: ' + data.error);
+                } else {
+                    setTimeout(() => pollJobStatus(jobId), 2000);
+                }
+            })
+            .catch(error => {
+                scanForm.querySelector('button').disabled = false;
+                loadingState.classList.add('hidden');
+                alert('Failed to check scan status: ' + error.message);
+            });
+    }
 
     function renderResults(results) {
         if (results.length === 0) {
