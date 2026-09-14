@@ -1,9 +1,9 @@
 package main
 
 import (
-	"fmt"
 	"log"
-	"os"
+	"net/http"
+	"time"
 
 	"gitlab-code-scan/internal/config"
 	"gitlab-code-scan/internal/handlers"
@@ -16,40 +16,31 @@ import (
 
 func main() {
 	config.Load()
-	
-	dbHost := os.Getenv("DB_HOST")
-	if dbHost == "" {
-		dbHost = "localhost"
-	}
-	dbPort := os.Getenv("DB_PORT")
-	if dbPort == "" {
-		dbPort = "5433"
-	}
-	dbUser := os.Getenv("DB_USER")
-	if dbUser == "" {
-		dbUser = "scanner"
-	}
-	dbPassword := os.Getenv("DB_PASSWORD")
-	if dbPassword == "" {
-		dbPassword = "scanner_password"
-	}
-	dbName := os.Getenv("DB_NAME")
-	if dbName == "" {
-		dbName = "scanner_db"
-	}
 
-	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=UTC", dbHost, dbUser, dbPassword, dbName, dbPort)
-	repository.InitDB(dsn)
+	repository.InitDB(config.DatabaseDSN)
 
+	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
 	// Setup Sessions
 	store := cookie.NewStore(config.SessionKey)
 	r.Use(sessions.Sessions("gitlab-scan-session", store))
 
-	// Serve Static Files
-	r.Static("/static", "./web/static")
+	// ── Static files with HTTP cache headers (7-day browser cache) ────────────
+	staticGroup := r.Group("/static")
+	staticGroup.Use(func(c *gin.Context) {
+		c.Header("Cache-Control", "public, max-age=604800, immutable")
+		c.Header("Expires", time.Now().Add(7*24*time.Hour).UTC().Format(http.TimeFormat))
+		c.Next()
+	})
+	staticGroup.Static("/", "./web/static")
+
 	r.LoadHTMLGlob("web/templates/*")
+
+	// Suppress browser favicon 404
+	r.GET("/favicon.ico", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
 
 	// Frontend routes
 	r.GET("/", func(c *gin.Context) {
@@ -80,3 +71,4 @@ func main() {
 		log.Fatal(err)
 	}
 }
+

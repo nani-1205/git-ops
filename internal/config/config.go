@@ -2,6 +2,7 @@ package config
 
 import (
 	"crypto/tls"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -14,9 +15,12 @@ var (
 	OAuthConfig *oauth2.Config
 	GitLabURL   string
 	SessionKey  []byte
+
+	// DatabaseDSN is the fully assembled PostgreSQL connection string.
+	DatabaseDSN string
 )
 
-// InsecureHTTPClient is a globally available HTTP client with SSL verification disabled
+// InsecureHTTPClient is a globally available HTTP client with SSL verification disabled.
 var InsecureHTTPClient *http.Client
 
 func Load() {
@@ -24,6 +28,7 @@ func Load() {
 		log.Println("No .env file found, relying on environment variables")
 	}
 
+	// ── GitLab ────────────────────────────────────────────────────────────────
 	GitLabURL = os.Getenv("GITLAB_URL")
 	if GitLabURL == "" {
 		log.Fatal("GITLAB_URL is required")
@@ -47,15 +52,41 @@ func Load() {
 		},
 	}
 
+	// ── Session ───────────────────────────────────────────────────────────────
 	sessionSecret := os.Getenv("SESSION_SECRET")
 	if sessionSecret == "" {
 		sessionSecret = "super-secret-key-replace-in-production"
 	}
 	SessionKey = []byte(sessionSecret)
 
-	// Create a global insecure HTTP client for when we need to bypass SSL
+	// ── Database ──────────────────────────────────────────────────────────────
+	DatabaseDSN = buildDSN()
+
+	// ── HTTP client (SSL verification disabled) ───────────────────────────────
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 	InsecureHTTPClient = &http.Client{Transport: tr}
 }
+
+// buildDSN assembles a PostgreSQL DSN from environment variables.
+// All values fall back to the defaults that match docker-compose.yml.
+func buildDSN() string {
+	host := getEnvOrDefault("DB_HOST", "localhost")
+	port := getEnvOrDefault("DB_PORT", "5433")
+	user := getEnvOrDefault("DB_USER", "scanner")
+	password := getEnvOrDefault("DB_PASSWORD", "scanner_password")
+	name := getEnvOrDefault("DB_NAME", "scanner_db")
+	return fmt.Sprintf(
+		"host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=UTC",
+		host, user, password, name, port,
+	)
+}
+
+func getEnvOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+

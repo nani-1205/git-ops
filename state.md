@@ -6,7 +6,9 @@ This document summarizes the development progress, architectural decisions, and 
 ## Architecture & Tech Stack
 - **Backend:** Go (Golang)
 - **Web Framework:** Gin (`github.com/gin-gonic/gin`)
-- **Database:** SQLite (Pure Go driver `github.com/glebarez/sqlite` to avoid CGO requirements on Windows)
+- **Database:** PostgreSQL 18 (using `gorm.io/driver/postgres`)
+- **Load Balancer:** Nginx
+- **Containerization:** Docker Compose
 - **ORM:** GORM (`gorm.io/gorm`)
 - **GitLab Integration:** Official Go GitLab Client (`gitlab.com/gitlab-org/api/client-go`)
 - **PDF Generation:** gofpdf (`github.com/jung-kurt/gofpdf`)
@@ -19,39 +21,90 @@ This document summarizes the development progress, architectural decisions, and 
 - Implemented session cookies (`gin-contrib/sessions`) to persist user authentication.
 - Added API endpoints for `/auth/login`, `/auth/callback`, `/auth/logout`, and `/auth/me`.
 
-### 2. GitLab Code Scanning (`scanner.go`)
-- Developed a recursive scanner that finds all projects within a specified GitLab Group or Subgroup.
-- Utilized GitLab's Search API (`client.Search.BlobsByProject`) to find specific keywords in the codebase.
-- **Branch Support:** Added the ability to specify a non-default branch (e.g., `jhsqa3`) to search against using the `Ref` parameter.
-- **Deep Linking:** Engineered the scanner to extract exact line numbers (`blob.Startline`) and generate deep links (e.g., `/-/blob/main/path#L123`) that jump directly to the highlighted code in GitLab.
-- Uses `gitlab.NewOAuthClient` to seamlessly authenticate API requests using the user's active SSO token.
+### 2. GitLab Code Scanning (`scanner.go`) — **Rewritten for Speed**
+- **Strategy change:** Replaced GitLab's Elasticsearch blob search API (slow, requires Advanced Search) with a direct **file-tree walk + local grep** approach, identical to the proven Python implementation.
+- **Two-level parallelism:**
+  - `PROJECT_WORKERS` goroutines scan repositories concurrently (default: 4, env-configurable).
+  - `FILE_WORKERS` goroutines fetch and scan files within each repo concurrently (default: 3, env-configurable).
+- **BFS group traversal:** `collectGroupProjects()` performs a breadth-first search over all subgroups, deduplicating by project ID — mirrors Python's `collect_group_projects`.
+- **File fetch with fallback:** Primary path via GitLab Files API; falls back to raw blob SHA fetch for files >1 MB.
+- **Binary file detection:** First 8 KB checked for null bytes; binary files silently skipped.
+- **Branch resolution:** `resolveRef()` tries the target branch, falls back to the project's default branch.
+- **Deep Linking:** URL-encoded deep links pointing directly to the exact line in GitLab.
+- **Progress tracking:** `ScanProgress` struct with atomic counters (`ProjectsTotal`, `ProjectsScanned`, `TotalMatches`) for live status polling.
 
-### 3. PDF Reporting (`pdf_generator.go`)
+### 3. Structured Logging
+- All scanner stages emit prefixed, emoji-tagged log lines for easy filtering:
+  - `📂 [BFS]` — group/subgroup traversal progress
+  - `🚀 [PROJECT]` — per-repo scan start with progress counter (e.g. `3/10`)
+  - `📋 [PROJECT]` — file count and worker count before scanning
+  - `✅ [PROJECT]` — per-repo completion with file/match counts and running total
+  - `🎯 [MATCH]` — every keyword hit with file, line number, and project
+  - `⏭️  [FILE]` — binary file skip notification
+  - `⚠️  [FILE/PROJECT/BFS]` — fetch errors and warnings
+  - `🔎 [SCAN]` — scan start summary (projects, workers, terms)
+  - `🏁 [SCAN]` — scan completion summary
+
+### 4. Centralised Configuration (`config.go`)
+- All runtime configuration (GitLab OAuth, session, **database DSN**, and **worker counts**) is loaded once in `config.Load()`.
+- `main.go` reduced to a single `repository.InitDB(config.DatabaseDSN)` call — no inline env reads scattered in application code.
+- `getEnvOrDefault()` helper keeps fallback defaults in one place.
+
+### 5. Environment-Driven Tunability (`.env`)
+- All config is now declared in `.env` / `.env.example`, including:
+  - `PROJECT_WORKERS` / `FILE_WORKERS` for scanner concurrency.
+  - `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` for the database.
+
+### 6. Asynchronous Jobs & Scaling (`scan_handler.go`, `docker-compose.yml`)
+- Introduced an asynchronous background worker architecture to prevent 504 Gateway Timeouts on massive scans.
+- `ScanHandler` now creates a `ScanJob` in PostgreSQL and returns a `job_id` immediately.
+- The UI polls `/api/scan/:id` (`JobStatusHandler`) to check job progress.
+- Migrated from SQLite to PostgreSQL 18 to support concurrent database writes.
+- Scaled the backend to **3 replicas** behind an Nginx reverse proxy load balancer (`nginx.conf`).
+
+### 7. PDF Reporting (`pdf_generator.go`)
 - Implemented a PDF generator that builds a well-structured, grouped report of all scan findings.
 - Prints the exact File Name, Line Number, Keyword, and the *Full Code Snippet*.
 - Includes clickable deep links directly in the PDF document.
 - **Optimization:** The PDF export endpoint accepts cached scan results directly from the frontend, making PDF generation instantaneous without needing to re-query the GitLab API.
 
-### 4. Database & History (`models.go`, `db.go`)
-- Implemented automatic database migrations for the `User` and `ScanHistory` models.
+### 8. Database & History (`models.go`, `db.go`)
+- Implemented automatic database migrations for the `User`, `ScanHistory`, and `ScanJob` models.
 - Tracks every scan performed by a user, including the Group ID, Keywords, Branch, and Match Count.
 
-### 5. Frontend Dashboard
+### 9. Frontend Dashboard
 - Built a modern, dark-themed, responsive dashboard.
-- Uses dynamic fetch requests to prevent page reloads.
+- Uses dynamic fetch requests with asynchronous polling to prevent page reloads and timeout errors.
 - Includes comprehensive error handling to display exact server errors (e.g., 401 Unauthorized or 404 Not Found) to the user.
+### 10. Response Caching & Performance (`group_handler.go`, `main.go`, `app.js`)
+- **Groups list cache (10-min TTL):** First fetch from GitLab takes ~9s for large instances, all subsequent requests in 10 minutes return in `<5ms`. Keyed per user OAuth token.
+- **Group projects cache (5-min TTL):** Per group-ID cache so re-selecting a group after the first load is instant.
+- **Frontend debounce (300ms):** Rapid checkbox clicks no longer fire N×N API calls — batched into one request after 300ms idle.
+- **Static file browser cache (7-day `Cache-Control`):** CSS/JS/images served with `public, max-age=604800, immutable`. Browser serves from disk on revisit.
+- **Favicon 204:** `/favicon.ico` returns `204 No Content` instead of `404` — silent, no error log noise.
+- **Gin release mode:** `gin.SetMode(gin.ReleaseMode)` removes debug warnings from startup output.
 
 ## Known Limitations / Notes
-- **GitLab Search Indexing:** GitLab's Basic Search API can sometimes be slow on very large monorepos. If the instance has Advanced Search (Elasticsearch) enabled, the API automatically leverages it for faster results.
 - **Self-Hosted SSL:** The scanner is configured to skip SSL verification (`InsecureSkipVerify: true`) to support self-hosted GitLab instances using custom or self-signed certificates.
+- **Rate Limiting:** Very high `PROJECT_WORKERS` × `FILE_WORKERS` values may trigger GitLab API rate limits. Defaults (4 × 3) are conservative and safe.
 
 ## Completed Tasks
 - [x] Initial project scaffolding and routing.
 - [x] OAuth SSO integration.
-- [x] Database configuration (migrated from CGO SQLite to Pure Go SQLite).
-- [x] Scanner core logic.
+- [x] Scanner core logic — initial implementation.
 - [x] UI/UX design and implementation.
-- [x] PDF Generator integration.
+- [x] PDF Generator integration with Unicode safety.
 - [x] Branch-specific searching.
 - [x] Line-number deep linking.
 - [x] Instant PDF Export optimization.
+- [x] Migrate to PostgreSQL for concurrent access.
+- [x] Asynchronous background job processing and UI polling.
+- [x] Nginx load balancing and 3-replica Docker Compose scaling.
+- [x] **Scanner rewrite:** Replaced Elasticsearch blob search with file-tree walk + local grep (2-level goroutine parallelism).
+- [x] **Config centralisation:** All DB and worker config moved to `config.go`, driven entirely by `.env`.
+- [x] **Structured logging:** Emoji-prefixed, filterable log lines for every stage of the scan pipeline.
+- [x] **Env documentation:** DB and worker tunables added to `.env` and `.env.example`.
+- [x] **Response caching:** 10-min groups list + 5-min group projects TTL cache.
+- [x] **Frontend debounce:** 300ms debounce on checkbox clicks prevents N×N API calls.
+- [x] **Static file caching:** 7-day `Cache-Control` headers; browser serves from disk on revisit.
+- [x] **Gin release mode + favicon 204:** Clean startup logs, no 404 noise.

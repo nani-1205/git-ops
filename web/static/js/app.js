@@ -28,6 +28,13 @@ document.addEventListener('DOMContentLoaded', () => {
     let lastScanResults = [];
     let selectedGroupIds = new Set();
     let selectedGroupNames = new Set();
+    let fetchProjectsDebounceTimer = null;
+
+    // Debounce wrapper: waits 300ms after the last checkbox click before fetching.
+    function debouncedFetchProjects() {
+        clearTimeout(fetchProjectsDebounceTimer);
+        fetchProjectsDebounceTimer = setTimeout(fetchMultipleGroupProjects, 300);
+    }
 
     // Check if user is logged in
     fetch('/auth/me')
@@ -168,7 +175,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     selectedGroupNames.delete(node.full_path);
                     li.classList.remove('active');
                 }
-                fetchMultipleGroupProjects();
+                fetchMultipleGroupProjects.cancel && fetchMultipleGroupProjects.cancel();
+                debouncedFetchProjects();
             });
 
             const nameSpan = document.createElement('span');
