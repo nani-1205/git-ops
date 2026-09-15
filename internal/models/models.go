@@ -23,6 +23,7 @@ type ScanHistory struct {
 
 type ScanJob struct {
 	gorm.Model
+	JobType      string `gorm:"default:'scan'"`    // scan, commits, compare
 	Status       string `gorm:"default:'pending'"` // pending, running, completed, failed
 	Results      string `gorm:"type:text"`         // JSON serialized results
 	ErrorMessage string `gorm:"type:text"`

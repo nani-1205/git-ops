@@ -64,6 +64,12 @@ func main() {
 		api.POST("/scan", handlers.ScanHandler)
 		api.GET("/scan/:id", handlers.JobStatusHandler)
 		api.POST("/export", handlers.ExportPDFHandler)
+		
+		// New report endpoints
+		api.POST("/reports/commits", handlers.ReportCommitsHandler)
+		api.POST("/reports/compare", handlers.ReportCompareHandler)
+		api.POST("/reports/commits/export", handlers.ExportCommitsHandler)
+		api.POST("/reports/compare/export", handlers.ExportCompareHandler)
 	}
 
 	log.Println("Server starting on :5050")

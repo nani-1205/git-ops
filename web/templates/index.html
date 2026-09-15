@@ -57,6 +57,14 @@
             <div class="dashboard-layout">
                 <aside class="sidebar">
                     <div class="sidebar-header">
+                        <h3>Tools</h3>
+                    </div>
+                    <ul class="sidebar-nav">
+                        <li class="nav-item active" data-tool="scanner">Code Scanner</li>
+                        <li class="nav-item" data-tool="commits">Commit Reporter</li>
+                        <li class="nav-item" data-tool="compare">Branch Compare</li>
+                    </ul>
+                    <div class="sidebar-header" style="margin-top: 1rem;">
                         <h3>Your Groups</h3>
                     </div>
                     <div class="sidebar-search">
@@ -70,16 +78,16 @@
 
                 <main class="dashboard-content">
                     <div class="card scan-panel">
-                        <h2>
+                        <h2 id="tool-title">
                             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-                            New Scan
+                            Code Scanner
                         </h2>
                         <div id="no-group-selected" style="margin-bottom: 1.5rem; color: var(--color-muted-foreground);">
                             Please select a group from the sidebar to view its repositories.
                         </div>
                         <form id="scan-form" class="hidden">
                             <div class="form-group">
-                                <label>Repositories to Scan</label>
+                                <label>Repositories</label>
                                 <div class="project-list-container">
                                     <div class="project-item select-all-container">
                                         <input type="checkbox" id="select-all-projects">
@@ -90,30 +98,65 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="form-group">
-                                <label for="keywords">Keywords (comma separated)</label>
-                                <textarea id="keywords" class="input" placeholder="e.g. /api/v1/auth, /deprecated-endpoint" required></textarea>
+                            <div id="scanner-fields">
+                                <div class="form-group">
+                                    <label for="keywords">Keywords (comma separated)</label>
+                                    <textarea id="keywords" class="input" placeholder="e.g. /api/v1/auth, /deprecated-endpoint"></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label for="branch">Branch (optional, defaults to primary)</label>
+                                    <input type="text" id="branch" class="input" placeholder="e.g. main, develop">
+                                </div>
                             </div>
-                            <div class="form-group">
-                                <label for="branch">Branch (optional, defaults to primary)</label>
-                                <input type="text" id="branch" class="input" placeholder="e.g. main, develop">
+                            
+                            <div id="commits-fields" class="hidden">
+                                <div class="form-group">
+                                    <label for="commits-branch">Branch Name</label>
+                                    <input type="text" id="commits-branch" class="input" placeholder="e.g. main">
+                                </div>
+                                <div class="form-group" style="display: flex; gap: 1rem;">
+                                    <div style="flex: 1;">
+                                        <label for="start-date">Start Date</label>
+                                        <input type="datetime-local" id="start-date" class="input">
+                                    </div>
+                                    <div style="flex: 1;">
+                                        <label for="end-date">End Date</label>
+                                        <input type="datetime-local" id="end-date" class="input">
+                                    </div>
+                                </div>
                             </div>
-                            <button type="submit" id="btn-scan" class="btn btn-primary">Start Scan</button>
+
+                            <div id="compare-fields" class="hidden">
+                                <div class="form-group">
+                                    <label for="source-branch">Source Branch</label>
+                                    <input type="text" id="source-branch" class="input" placeholder="e.g. feature-branch">
+                                </div>
+                                <div class="form-group">
+                                    <label for="target-branch">Target Branch</label>
+                                    <input type="text" id="target-branch" class="input" placeholder="e.g. main">
+                                </div>
+                            </div>
+                            
+                            <button type="submit" id="btn-scan" class="btn btn-primary">Start Job</button>
                         </form>
                     </div>
 
                 <div id="loading-state" class="hidden">
                     <div class="spinner"></div>
-                    <p>Scanning repositories. This process may take several minutes...</p>
+                    <p>Processing repositories. This may take a while...</p>
                 </div>
 
                 <div id="results-panel" class="results-panel hidden">
                     <div class="results-header">
-                        <h2>Scan Results</h2>
-                        <button id="btn-export" class="btn btn-secondary">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                            Export PDF
-                        </button>
+                        <h2>Results</h2>
+                        <div style="display: flex; gap: 0.5rem;">
+                            <button id="btn-export-pdf" class="btn btn-secondary">
+                                Export PDF
+                            </button>
+                            <button id="btn-export-xlsx" class="btn btn-secondary hidden">
+                                Export XLSX
+                            </button>
+                        </div>
                     </div>
                     <div class="card table-container">
                         <table id="results-table">
