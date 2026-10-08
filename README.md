@@ -1,44 +1,51 @@
-# GitLab Code Scanner
+# GIT-OPS
 
-A powerful, Go-based web application designed to recursively scan all projects within a GitLab Group (or Subgroup) for specific keywords, endpoints, or deprecated functions. It features a modern Single Page Application dashboard and instantaneous PDF report generation with deep links directly to the offending lines of code.
+A powerful, Go-based DevOps web application for GitLab teams. GIT-OPS provides three core tools — **Code Scanner**, **Commit Reporter**, and **Branch Compare** — accessible through a modern, theme-aware Tool Hub interface after login.
+
+---
 
 ## Key Features
 
 - **GitLab SSO:** Securely login using your GitLab account via OAuth2.
-- **Recursive Group Scanning:** Enter a Group ID or path (e.g., `jpl/jhs/code/microservices`) and it will scan all repositories under that group via BFS subgroup traversal.
+- **Tool Hub:** A beautiful post-login landing screen with animated cards to select the tool you need — no cluttered sidebar navigation.
+- **Code Scanner:** Recursively scan all repositories within a GitLab Group (or Subgroup) for specific keywords, endpoints, or deprecated functions via BFS subgroup traversal.
 - **Fast Parallel Scanning:** Two-level goroutine parallelism — configurable `PROJECT_WORKERS` repos scanned concurrently, each with `FILE_WORKERS` file-fetching goroutines. No dependency on GitLab Elasticsearch.
-- **Smart Response Caching:** 10-minute TTL cache on GitLab API fetches for groups and 5-minute TTL for projects reduces UI latency from ~9s down to <5ms.
-- **Branch Support:** Search against the default branch, or specify any custom branch (e.g., `jhsqa3`).
-- **Exact Line Deep-Linking:** Generates precise URLs that take you directly to the highlighted line of code in the GitLab UI.
-- **Instant PDF Export:** Export your scan results into a neatly formatted PDF document instantly.
-- **Structured Logs:** Emoji-prefixed, filterable log output for every stage of the scan (group traversal, per-project progress, keyword matches, errors).
-- **Self-Hosted Friendly:** Configured to work seamlessly with self-hosted GitLab instances (includes SSL certificate bypass for internal servers).
+- **Commit Reporter:** Generate detailed reports of user commits over a specified date range and branch.
+- **Branch Compare:** Compare source and target branches to identify divergence and sync status.
+- **Smart Response Caching:** Redis-backed 10-minute TTL on groups + 15-minute TTL on projects — reduces UI latency from ~9s to <5ms.
+- **Instant PDF / XLSX Export:** Export scan results into formatted reports instantly (results cached in the browser, no re-scan required).
+- **Theme System:** Switch between **Dark**, **Light**, and **Mint (Retro)** themes at any time — even before login.
+- **Navigation State Persistence:** Refreshing the page while inside a tool restores your workspace, not the Hub.
+- **Structured Logs:** Emoji-prefixed, filterable log output for every scan stage.
+- **Self-Hosted Friendly:** Configured to work seamlessly with self-hosted GitLab instances (SSL certificate bypass for internal servers).
+
+---
 
 ## Prerequisites
 
-- [Go](https://golang.org/doc/install) (1.20 or higher recommended)
+- [Go](https://golang.org/doc/install) (1.20 or higher)
 - [Docker & Docker Compose](https://docs.docker.com/get-docker/)
+- [Redis](https://redis.io/) (local or containerised)
 - A GitLab Account (SaaS or Self-Hosted)
+
+---
 
 ## Setup & Installation
 
 ### 1. Create a GitLab OAuth Application
-Before running the scanner, you must register it as an OAuth application in your GitLab instance:
-1. Go to your GitLab **Admin Area** -> **Applications** (or User Settings -> Applications for a personal app).
-2. Click **New application**.
-3. Name it `GitLab Code Scanner`.
-4. Set the **Redirect URI** to `http://localhost:5050/auth/callback`.
-5. Check the boxes for the **`read_api`** and **`read_user`** scopes.
-6. Save the application and copy your **Application ID** and **Secret**.
+1. Go to your GitLab **Admin Area** → **Applications**.
+2. Click **New application** and name it `GIT-OPS`.
+3. Set the **Redirect URI** to `http://localhost:5050/auth/callback`.
+4. Check the **`read_api`** and **`read_user`** scopes.
+5. Save and copy your **Application ID** and **Secret**.
 
 ### 2. Configure Environment Variables
-Clone the repository and set up your environment variables:
 
 ```bash
 cp .env.example .env
 ```
 
-Edit the `.env` file and fill in your details:
+Edit `.env` with your details:
 
 ```env
 # GitLab OAuth
@@ -55,33 +62,56 @@ DB_USER=scanner
 DB_PASSWORD=scanner_password
 DB_NAME=scanner_db
 
+# Redis Cache
+REDIS_ADDR=localhost:6379
+
 # Scanner concurrency (tune to your GitLab server's capacity)
 PROJECT_WORKERS=4   # repos scanned in parallel
 FILE_WORKERS=3      # files fetched per repo in parallel
 ```
 
 ### 3. Run the Application
-The recommended way to run is Docker Compose, which starts PostgreSQL and Nginx alongside 3 app replicas:
+
+Recommended — Docker Compose (starts PostgreSQL, Redis, and Nginx alongside 3 app replicas):
 
 ```bash
 docker-compose up -d --build
 ```
 
-To run the server directly (DB must be running separately):
+Run directly (DB and Redis must be running separately):
 
 ```bash
-docker-compose up -d db          # start only the database
-go run ./cmd/server/main.go      # start the Go server
+docker-compose up -d db redis
+go run ./cmd/server/main.go
 ```
 
-### 4. Usage
-1. Open your browser at [http://localhost:5050](http://localhost:5050).
-2. Click **Sign in with GitLab SSO** and authorize the application.
-3. Enter your target **GitLab Group ID or Path** (e.g., `jpl/jhs/code/backendjobs/consumerjobs`).
-4. Enter comma-separated **Keywords** to search for (e.g., `/jhswebapi/api/jmapis/userDevices_JM`).
-5. (Optional) Enter a **Branch Name** to scan a non-default branch.
-6. Click **Start Scan**. The scan runs asynchronously in the background.
-7. Review results in the browser, click **View File** to jump to GitLab, or click **Export PDF**.
+---
+
+## Usage
+
+1. Open [http://localhost:5050](http://localhost:5050) in your browser.
+2. *(Optional)* Select a **theme** (Dark / Light / Mint) from the top-right dropdown before logging in.
+3. Click **Sign in with GitLab** and authorize the application.
+4. You land on the **Tool Hub** — select the tool you want to use.
+5. Use the **← Hub** button in the workspace header to return to the Tool Hub at any time.
+
+### Code Scanner
+1. Select one or more **Groups** from the sidebar.
+2. Enter comma-separated **Keywords** and an optional **Branch** name.
+3. Click **Start Scan**. Progress is polled in real time.
+4. Review results and click **Export PDF** or **Export XLSX**.
+
+### Commit Reporter
+1. Select a **Group** from the sidebar.
+2. Enter a **Branch**, **Start Date**, and **End Date**.
+3. Click **Generate Report** to view and export commit data.
+
+### Branch Compare
+1. Select a **Group** from the sidebar.
+2. Enter a **Source Branch** and **Target Branch**.
+3. Click **Compare** to see divergence status.
+
+---
 
 ## Log Output Reference
 
@@ -99,10 +129,23 @@ During a scan you'll see structured logs like:
 🏁 [SCAN]    Completed — 12 project(s) scanned | total matches=5
 ```
 
+---
+
 ## Architecture Overview
-- **Backend:** Go, Gin Framework (async job architecture, 2-level goroutine parallelism)
-- **Database:** PostgreSQL 18 (`gorm.io/driver/postgres`)
-- **Load Balancer:** Nginx (3 app replicas)
-- **API Integration:** `gitlab.com/gitlab-org/api/client-go`
-- **PDF Engine:** `jung-kurt/gofpdf`
-- **Frontend:** Vanilla HTML, CSS, JS (async polling UI)
+
+| Layer | Technology |
+|---|---|
+| Backend | Go, Gin Framework (async job architecture, 2-level goroutine parallelism) |
+| Database | PostgreSQL 18 (`gorm.io/driver/postgres`) |
+| Cache | Redis (TTL-based, keyed per user/group) |
+| Load Balancer | Nginx (3 app replicas) |
+| API Integration | `gitlab.com/gitlab-org/api/client-go` |
+| PDF Engine | `jung-kurt/gofpdf` |
+| Frontend | Vanilla HTML, CSS, JS — Tool Hub SPA with Dark / Light / Mint themes |
+
+---
+
+## Known Limitations
+
+- **Self-Hosted SSL:** Uses `InsecureSkipVerify: true` to support self-hosted GitLab with custom certificates.
+- **Rate Limiting:** Very high `PROJECT_WORKERS` × `FILE_WORKERS` may trigger GitLab API rate limits. Defaults (4 × 3) are safe and conservative.

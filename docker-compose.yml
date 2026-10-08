@@ -11,9 +11,15 @@ services:
       - DB_USER=scanner
       - DB_PASSWORD=scanner_password
       - DB_NAME=scanner_db
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - CACHE_TTL_GROUPS=30
+      - CACHE_TTL_PROJECTS=15
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
     deploy:
       replicas: 3
 
@@ -26,21 +32,20 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - db_data:/var/lib/postgresql
+      - db_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U scanner -d scanner_db"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
       retries: 5
-
-  nginx:
-    image: nginx:alpine
+      
+  redis:
+    image: redis:8-alpine
     ports:
-      - "5050:5050"
+      - "6379:6379"
     volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-    depends_on:
-      - gitlab-scanner
+      - redis_data:/data
 
 volumes:
   db_data:
+  redis_data:

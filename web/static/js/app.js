@@ -1,9 +1,35 @@
 document.addEventListener('DOMContentLoaded', () => {
     const loginView = document.getElementById('login-view');
+    const toolHubView = document.getElementById('tool-hub-view');
     const dashboardView = document.getElementById('dashboard-view');
     const btnLogin = document.getElementById('btn-login');
+    const btnBackHub = document.getElementById('btn-back-hub');
     const userNameEl = document.getElementById('user-name');
     const userAvatarEl = document.getElementById('user-avatar');
+
+    // Theme Toggle Logic
+    const savedTheme = localStorage.getItem('theme') || 'dark';
+    const themeSelects = document.querySelectorAll('.theme-select');
+    
+    function applyTheme(theme) {
+        document.body.classList.remove('light-mode', 'mint-mode');
+        if (theme === 'light') document.body.classList.add('light-mode');
+        if (theme === 'mint') document.body.classList.add('mint-mode');
+        localStorage.setItem('theme', theme);
+        
+        // Sync all selects
+        themeSelects.forEach(select => {
+            select.value = theme;
+        });
+    }
+    
+    applyTheme(savedTheme);
+
+    themeSelects.forEach(select => {
+        select.addEventListener('change', (e) => {
+            applyTheme(e.target.value);
+        });
+    });
     
     // Sidebar elements
     const groupList = document.getElementById('group-list');
@@ -32,22 +58,48 @@ document.addEventListener('DOMContentLoaded', () => {
     let selectedGroupNames = new Set();
     let fetchProjectsDebounceTimer = null;
 
-    // Tool navigation
-    document.querySelectorAll('.sidebar-nav .nav-item').forEach(item => {
-        item.addEventListener('click', (e) => {
-            document.querySelectorAll('.sidebar-nav .nav-item').forEach(nav => nav.classList.remove('active'));
-            e.currentTarget.classList.add('active');
-            
-            currentTool = e.currentTarget.dataset.tool;
-            document.getElementById('tool-title').innerHTML = e.currentTarget.innerHTML;
-            
-            document.getElementById('scanner-fields').classList.add('hidden');
-            document.getElementById('commits-fields').classList.add('hidden');
-            document.getElementById('compare-fields').classList.add('hidden');
-            
-            document.getElementById(`${currentTool}-fields`).classList.remove('hidden');
-            resultsPanel.classList.add('hidden');
+    function activateTool(targetTool, titleHtml) {
+        currentTool = targetTool;
+        document.getElementById('tool-title').innerHTML = titleHtml;
+        
+        document.getElementById('scanner-fields').classList.add('hidden');
+        document.getElementById('commits-fields').classList.add('hidden');
+        document.getElementById('compare-fields').classList.add('hidden');
+        
+        document.getElementById(`${currentTool}-fields`).classList.remove('hidden');
+        resultsPanel.classList.add('hidden');
+    }
+
+    // Tool Hub interactions — click and keyboard (Enter/Space)
+    document.querySelectorAll('.tool-card').forEach(card => {
+        const handler = () => {
+            const targetTool = card.getAttribute('data-target');
+            const titleHtml = card.querySelector('h3').innerHTML;
+            const iconHtml = card.querySelector('.tool-icon').innerHTML;
+
+            toolHubView.classList.remove('active');
+            dashboardView.classList.add('active');
+
+            localStorage.setItem('activeView', 'dashboard');
+            localStorage.setItem('activeTool', targetTool);
+
+            activateTool(targetTool, iconHtml + ' ' + titleHtml);
+        };
+
+        card.addEventListener('click', handler);
+        card.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                handler();
+            }
         });
+    });
+
+    // Back to hub
+    btnBackHub.addEventListener('click', () => {
+        dashboardView.classList.remove('active');
+        toolHubView.classList.add('active');
+        localStorage.setItem('activeView', 'hub');
     });
 
     // Debounce wrapper: waits 300ms after the last checkbox click before fetching.
@@ -67,13 +119,35 @@ document.addEventListener('DOMContentLoaded', () => {
         .then(data => {
             // User is logged in
             userNameEl.textContent = data.username;
+            document.querySelector('.user-name-hub').textContent = data.username;
             if (data.avatar_url) {
                 userAvatarEl.src = data.avatar_url;
+                document.querySelector('.user-avatar-hub').src = data.avatar_url;
             } else {
-                userAvatarEl.src = `https://ui-avatars.com/api/?name=${data.username}&background=random`;
+                const avatarUrl = `https://ui-avatars.com/api/?name=${data.username}&background=random`;
+                userAvatarEl.src = avatarUrl;
+                document.querySelector('.user-avatar-hub').src = avatarUrl;
             }
             loginView.classList.remove('active');
-            dashboardView.classList.add('active');
+            
+            const savedView = localStorage.getItem('activeView') || 'hub';
+            if (savedView === 'dashboard') {
+                const savedTool = localStorage.getItem('activeTool') || 'scanner';
+                const card = document.querySelector(`.tool-card[data-target="${savedTool}"]`);
+                if (card) {
+                    const titleHtml = card.querySelector('h3').innerHTML;
+                    const iconHtml = card.querySelector('.tool-icon').innerHTML;
+                    dashboardView.classList.add('active');
+                    toolHubView.classList.remove('active');
+                    activateTool(savedTool, iconHtml + ' ' + titleHtml);
+                } else {
+                    toolHubView.classList.add('active');
+                    dashboardView.classList.remove('active');
+                }
+            } else {
+                toolHubView.classList.add('active');
+                dashboardView.classList.remove('active');
+            }
             
             // Fetch groups
             fetchGroups();
@@ -81,6 +155,7 @@ document.addEventListener('DOMContentLoaded', () => {
         .catch(() => {
             // Not logged in, stay on login view
             loginView.classList.add('active');
+            toolHubView.classList.remove('active');
             dashboardView.classList.remove('active');
         });
 

@@ -138,7 +138,7 @@ func GenerateCommitReport(projectIDs []int, branch, startDateStr, endDateStr, to
 						}
 
 						projCommits = append(projCommits, CommitResult{
-							ProjectName:   proj.PathWithNamespace,
+							ProjectName:   proj.Name,
 							ShortID:       c.ShortID,
 							Title:         c.Title,
 							AuthorName:    c.AuthorName,

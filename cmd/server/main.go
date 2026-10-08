@@ -18,6 +18,10 @@ func main() {
 	config.Load()
 
 	repository.InitDB(config.DatabaseDSN)
+	
+	if err := repository.InitRedis(config.RedisHost, config.RedisPort, config.RedisPassword); err != nil {
+		log.Printf("Warning: Redis initialization failed: %v", err)
+	}
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()

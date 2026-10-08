@@ -6,9 +6,9 @@
 
 ---
 
-**Project:** GitLab Scanner
-**Generated:** 2026-08-28 14:51:10
-**Category:** Developer Tool / IDE
+**Project:** GIT-OPS
+**Last Updated:** 2026-09-25
+**Category:** Developer Tool / DevOps / IDE
 
 ---
 

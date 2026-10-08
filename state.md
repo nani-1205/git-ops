@@ -1,18 +1,21 @@
-# GitLab Code Scanner - Project State
+# GIT-OPS - Project State
 
 ## Overview
-This document summarizes the development progress, architectural decisions, and features implemented in the GitLab Code Scanner project up to the current date.
+This document summarizes the development progress, architectural decisions, and features implemented in the GIT-OPS project (formerly GitLab Code Scanner).
 
 ## Architecture & Tech Stack
 - **Backend:** Go (Golang)
 - **Web Framework:** Gin (`github.com/gin-gonic/gin`)
 - **Database:** PostgreSQL 18 (using `gorm.io/driver/postgres`)
+- **Cache:** Redis (TTL-based caching via `go-redis`)
 - **Load Balancer:** Nginx
 - **Containerization:** Docker Compose
 - **ORM:** GORM (`gorm.io/gorm`)
 - **GitLab Integration:** Official Go GitLab Client (`gitlab.com/gitlab-org/api/client-go`)
 - **PDF Generation:** gofpdf (`github.com/jung-kurt/gofpdf`)
-- **Frontend:** Vanilla HTML, CSS, JavaScript (Single Page Application with Glassmorphism UI)
+- **Frontend:** Vanilla HTML, CSS, JavaScript (Single Page Application — Tool Hub pattern)
+
+---
 
 ## Features Implemented
 
@@ -22,11 +25,11 @@ This document summarizes the development progress, architectural decisions, and 
 - Added API endpoints for `/auth/login`, `/auth/callback`, `/auth/logout`, and `/auth/me`.
 
 ### 2. GitLab Code Scanning (`scanner.go`) — **Rewritten for Speed**
-- **Strategy change:** Replaced GitLab's Elasticsearch blob search API (slow, requires Advanced Search) with a direct **file-tree walk + local grep** approach, identical to the proven Python implementation.
+- **Strategy change:** Replaced GitLab's Elasticsearch blob search API (slow, requires Advanced Search) with a direct **file-tree walk + local grep** approach.
 - **Two-level parallelism:**
   - `PROJECT_WORKERS` goroutines scan repositories concurrently (default: 4, env-configurable).
   - `FILE_WORKERS` goroutines fetch and scan files within each repo concurrently (default: 3, env-configurable).
-- **BFS group traversal:** `collectGroupProjects()` performs a breadth-first search over all subgroups, deduplicating by project ID — mirrors Python's `collect_group_projects`.
+- **BFS group traversal:** `collectGroupProjects()` performs a breadth-first search over all subgroups, deduplicating by project ID.
 - **File fetch with fallback:** Primary path via GitLab Files API; falls back to raw blob SHA fetch for files >1 MB.
 - **Binary file detection:** First 8 KB checked for null bytes; binary files silently skipped.
 - **Branch resolution:** `resolveRef()` tries the target branch, falls back to the project's default branch.
@@ -47,11 +50,10 @@ This document summarizes the development progress, architectural decisions, and 
 
 ### 4. Centralised Configuration (`config.go`)
 - All runtime configuration (GitLab OAuth, session, **database DSN**, and **worker counts**) is loaded once in `config.Load()`.
-- `main.go` reduced to a single `repository.InitDB(config.DatabaseDSN)` call — no inline env reads scattered in application code.
 - `getEnvOrDefault()` helper keeps fallback defaults in one place.
 
 ### 5. Environment-Driven Tunability (`.env`)
-- All config is now declared in `.env` / `.env.example`, including:
+- All config is declared in `.env` / `.env.example`, including:
   - `PROJECT_WORKERS` / `FILE_WORKERS` for scanner concurrency.
   - `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` for the database.
 
@@ -60,33 +62,69 @@ This document summarizes the development progress, architectural decisions, and 
 - `ScanHandler` now creates a `ScanJob` in PostgreSQL and returns a `job_id` immediately.
 - The UI polls `/api/scan/:id` (`JobStatusHandler`) to check job progress.
 - Migrated from SQLite to PostgreSQL 18 to support concurrent database writes.
-- Scaled the backend to **3 replicas** behind an Nginx reverse proxy load balancer (`nginx.conf`).
+- Scaled the backend to **3 replicas** behind an Nginx reverse proxy load balancer.
 
-### 7. PDF Reporting (`pdf_generator.go`)
-- Implemented a PDF generator that builds a well-structured, grouped report of all scan findings.
-- Prints the exact File Name, Line Number, Keyword, and the *Full Code Snippet*.
+### 7. PDF & Excel Reporting
+- PDF generator builds a well-structured, grouped report of all scan findings.
+- Prints the exact File Name, Line Number, Keyword, and Full Code Snippet.
 - Includes clickable deep links directly in the PDF document.
-- **Optimization:** The PDF export endpoint accepts cached scan results directly from the frontend, making PDF generation instantaneous without needing to re-query the GitLab API.
+- PDF/Excel export endpoints accept cached scan results from the frontend — instantaneous without re-querying GitLab API.
 
 ### 8. Database & History (`models.go`, `db.go`)
 - Implemented automatic database migrations for the `User`, `ScanHistory`, and `ScanJob` models.
 - Tracks every scan performed by a user, including the Group ID, Keywords, Branch, and Match Count.
 
-### 9. Frontend Dashboard
-- Built a modern, dark-themed, responsive dashboard.
-- Uses dynamic fetch requests with asynchronous polling to prevent page reloads and timeout errors.
-- Includes comprehensive error handling to display exact server errors (e.g., 401 Unauthorized or 404 Not Found) to the user.
-### 10. Response Caching & Performance (`group_handler.go`, `main.go`, `app.js`)
-- **Groups list cache (10-min TTL):** First fetch from GitLab takes ~9s for large instances, all subsequent requests in 10 minutes return in `<5ms`. Keyed per user OAuth token.
-- **Group projects cache (5-min TTL):** Per group-ID cache so re-selecting a group after the first load is instant.
-- **Frontend debounce (300ms):** Rapid checkbox clicks no longer fire N×N API calls — batched into one request after 300ms idle.
-- **Static file browser cache (7-day `Cache-Control`):** CSS/JS/images served with `public, max-age=604800, immutable`. Browser serves from disk on revisit.
-- **Favicon 204:** `/favicon.ico` returns `204 No Content` instead of `404` — silent, no error log noise.
-- **Gin release mode:** `gin.SetMode(gin.ReleaseMode)` removes debug warnings from startup output.
+### 9. Response Caching & Performance
+- **Groups list cache (10-min TTL):** First fetch from GitLab takes ~9s for large instances; subsequent requests <5ms. Keyed per user OAuth token.
+- **Group projects cache (15-min TTL):** Per group-ID cache for instant re-selection.
+- **Frontend debounce (300ms):** Rapid checkbox clicks batched into one request after 300ms idle.
+- **Static file browser cache (7-day `Cache-Control`):** CSS/JS/images served with `public, max-age=604800, immutable`.
+- **Favicon 204:** `/favicon.ico` returns `204 No Content` to suppress 404 noise.
+- **Gin release mode:** `gin.SetMode(gin.ReleaseMode)` removes debug warnings.
+
+---
+
+## UI/UX — Tool Hub Design System
+
+### Branding
+- Application renamed from **GitLab Scanner** to **GIT-OPS** across all templates, PDF reports, and export filenames.
+
+### Tool Hub (Post-Login Landing)
+- After login, users land on the **Tool Hub** — a dedicated, card-based landing screen instead of jumping directly into a tool.
+- The Hub displays three tool cards: **Code Scanner**, **Commit Reporter**, and **Branch Compare**.
+- Each card has a tool icon, title, description, hover animations (lift + gradient overlay), and navigates directly into the selected tool's workspace.
+
+### Workspace (Per-Tool View)
+- The **Dashboard/Workspace** view is reached by selecting a tool from the Hub.
+- **Back to Hub** button in the top navigation bar (pill-shaped, with animated back-arrow icon) returns the user to the Hub.
+- The "Tools" sidebar list (redundant after introducing the Hub) has been removed to declutter the sidebar. The sidebar now shows only **Your Groups**.
+- Active tool title and icon are shown in the workspace header.
+
+### Navigation State Persistence
+- `localStorage` persists `activeView` (`hub` or `dashboard`) and `activeTool` (`scanner`, `commits`, `compare`).
+- On page refresh while inside a tool, the app restores the user directly to their active workspace — not back to the Hub.
+
+### Theme System
+- Three themes supported: **Dark** (default), **Light**, and **Mint (Retro)**.
+- All themes are defined via CSS custom property overrides (`:root`, `.light-mode`, `.mint-mode`).
+- A `<select>` theme dropdown is placed in the **login page brand header** (top-right) — users can choose a theme before signing in.
+- The same dropdown appears in the **top navigation bar** of both the Hub and Workspace views, keeping selection always accessible.
+- All theme selects are kept in sync; selecting on any view updates all others.
+- Theme preference is saved to `localStorage` and restored on every page load.
+
+### Mint (Retro) Theme Details
+- Background: `#CFFFD9` (mint green)
+- Text: `#000000` (stark black)
+- Borders & shadows: solid black, offset box-shadow for retro feel
+- Login page headings and brand text use `var(--color-foreground)` — readable in all themes.
+
+---
 
 ## Known Limitations / Notes
-- **Self-Hosted SSL:** The scanner is configured to skip SSL verification (`InsecureSkipVerify: true`) to support self-hosted GitLab instances using custom or self-signed certificates.
+- **Self-Hosted SSL:** The scanner is configured to skip SSL verification (`InsecureSkipVerify: true`) for self-hosted GitLab instances with custom certificates.
 - **Rate Limiting:** Very high `PROJECT_WORKERS` × `FILE_WORKERS` values may trigger GitLab API rate limits. Defaults (4 × 3) are conservative and safe.
+
+---
 
 ## Completed Tasks
 - [x] Initial project scaffolding and routing.
@@ -103,8 +141,15 @@ This document summarizes the development progress, architectural decisions, and 
 - [x] **Scanner rewrite:** Replaced Elasticsearch blob search with file-tree walk + local grep (2-level goroutine parallelism).
 - [x] **Config centralisation:** All DB and worker config moved to `config.go`, driven entirely by `.env`.
 - [x] **Structured logging:** Emoji-prefixed, filterable log lines for every stage of the scan pipeline.
-- [x] **Env documentation:** DB and worker tunables added to `.env` and `.env.example`.
-- [x] **Response caching:** 10-min groups list + 5-min group projects TTL cache.
+- [x] **Response caching:** Redis-backed 10-min groups list + 15-min group projects TTL cache.
 - [x] **Frontend debounce:** 300ms debounce on checkbox clicks prevents N×N API calls.
-- [x] **Static file caching:** 7-day `Cache-Control` headers; browser serves from disk on revisit.
-- [x] **Gin release mode + favicon 204:** Clean startup logs, no 404 noise.
+- [x] **Static file caching:** 7-day `Cache-Control` headers.
+- [x] **Gin release mode + favicon 204:** Clean startup logs.
+- [x] **Branding rename:** Application renamed to GIT-OPS across all files.
+- [x] **Tool Hub UI:** Post-login landing page with 3 animated tool selection cards.
+- [x] **Workspace view:** Tool-specific workspace with Back to Hub button.
+- [x] **Sidebar cleanup:** Removed redundant Tools navigation list from workspace sidebar.
+- [x] **Navigation state persistence:** `localStorage` preserves active view and tool on page refresh.
+- [x] **Theme system:** Dark / Light / Mint (Retro) themes via CSS variables.
+- [x] **Login page theme select:** Theme can be selected before login.
+- [x] **Back to Hub button:** Pill-shaped button with animated back-arrow micro-interaction.

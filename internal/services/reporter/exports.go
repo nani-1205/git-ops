@@ -13,12 +13,12 @@ func GenerateCommitsPDF(results []CommitResult, groupID string) (*gofpdf.Fpdf, e
 	tr := pdf.UnicodeTranslatorFromDescriptor("")
 
 	pdf.SetFont("Arial", "B", 14)
-	pdf.Cell(40, 10, tr("GitLab Commits Report"))
+	pdf.Cell(40, 10, tr("GIT-OPS Commits Report"))
 	pdf.Ln(8)
 	
 	pdf.SetFont("Arial", "", 10)
-	pdf.Cell(40, 6, tr(fmt.Sprintf("Group: %s", groupID)))
-	pdf.Ln(6)
+	pdf.MultiCell(0, 6, tr(fmt.Sprintf("Group: %s", groupID)), "", "L", false)
+	pdf.Ln(2)
 	pdf.Cell(40, 6, tr(fmt.Sprintf("Total Commits: %d", len(results))))
 	pdf.Ln(10)
 
@@ -34,7 +34,12 @@ func GenerateCommitsPDF(results []CommitResult, groupID string) (*gofpdf.Fpdf, e
 	pdf.SetFont("Arial", "", 8)
 	for _, r := range results {
 		pdf.CellFormat(colWidths[0], 8, tr(truncate(r.ProjectName, 35)), "1", 0, "L", false, 0, "")
+		// ID cell — styled as hyperlink (blue + underline) so user knows it's clickable
+		pdf.SetFont("Arial", "U", 8)
+		pdf.SetTextColor(0, 0, 200)
 		pdf.CellFormat(colWidths[1], 8, tr(r.ShortID), "1", 0, "C", false, 0, r.WebURL)
+		pdf.SetTextColor(0, 0, 0)
+		pdf.SetFont("Arial", "", 8)
 		pdf.CellFormat(colWidths[2], 8, tr(truncate(r.AuthorName, 15)), "1", 0, "C", false, 0, "")
 		pdf.CellFormat(colWidths[3], 8, tr(r.CommittedDate), "1", 0, "C", false, 0, "")
 		
@@ -82,12 +87,12 @@ func GenerateComparePDF(results []CompareResult, groupID string) (*gofpdf.Fpdf, 
 	tr := pdf.UnicodeTranslatorFromDescriptor("")
 
 	pdf.SetFont("Arial", "B", 14)
-	pdf.Cell(40, 10, tr("GitLab Branch Comparison Report"))
+	pdf.Cell(40, 10, tr("GIT-OPS Branch Comparison Report"))
 	pdf.Ln(8)
 	
 	pdf.SetFont("Arial", "", 10)
-	pdf.Cell(40, 6, tr(fmt.Sprintf("Group: %s", groupID)))
-	pdf.Ln(10)
+	pdf.MultiCell(0, 6, tr(fmt.Sprintf("Group: %s", groupID)), "", "L", false)
+	pdf.Ln(4)
 
 	pdf.SetFont("Arial", "B", 8)
 	colWidths := []float64{50, 20, 20, 12, 12, 12, 12, 12, 18, 110}

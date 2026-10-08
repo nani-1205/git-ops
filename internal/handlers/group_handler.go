@@ -3,98 +3,102 @@ package handlers
 import (
 	"log"
 	"net/http"
-	"sync"
 	"time"
 
+	"encoding/json"
+	"fmt"
+
+	"gitlab-code-scan/internal/config"
+	"gitlab-code-scan/internal/repository"
 	"gitlab-code-scan/internal/services/scanner"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
-)
-
-// ---------------------------------------------------------------------------
-// Simple TTL cache for group projects — avoids repeated GitLab API calls when
-// the user clicks multiple checkboxes in quick succession.
-// ---------------------------------------------------------------------------
-
-const (
-	groupProjectsCacheTTL = 5 * time.Minute
-	groupListCacheTTL     = 10 * time.Minute
 )
 
 // ---------------------------------------------------------------------------
 // Cache: group projects (keyed by group ID)
 // ---------------------------------------------------------------------------
 
-type groupProjectsCacheEntry struct {
-	projects  []*gitlab.Project
-	fetchedAt time.Time
-}
-
-var (
-	groupProjectsCache   = map[string]*groupProjectsCacheEntry{}
-	groupProjectsCacheMu sync.RWMutex
-)
-
 func getCachedGroupProjects(groupID string) ([]*gitlab.Project, bool) {
-	groupProjectsCacheMu.RLock()
-	defer groupProjectsCacheMu.RUnlock()
-	entry, ok := groupProjectsCache[groupID]
-	if !ok || time.Since(entry.fetchedAt) > groupProjectsCacheTTL {
+	if repository.RedisClient == nil {
 		return nil, false
 	}
-	return entry.projects, true
+	key := fmt.Sprintf("gitlab_projects_%s", groupID)
+	val, err := repository.RedisClient.Get(repository.Ctx, key).Result()
+	if err == redis.Nil || err != nil {
+		return nil, false
+	}
+
+	var projects []*gitlab.Project
+	if err := json.Unmarshal([]byte(val), &projects); err != nil {
+		return nil, false
+	}
+	return projects, true
 }
 
 func setCachedGroupProjects(groupID string, projects []*gitlab.Project) {
-	groupProjectsCacheMu.Lock()
-	defer groupProjectsCacheMu.Unlock()
-	groupProjectsCache[groupID] = &groupProjectsCacheEntry{
-		projects:  projects,
-		fetchedAt: time.Now(),
+	if repository.RedisClient == nil {
+		return
 	}
+	key := fmt.Sprintf("gitlab_projects_%s", groupID)
+	data, err := json.Marshal(projects)
+	if err != nil {
+		return
+	}
+	ttl := time.Duration(config.CacheTTLProjects) * time.Minute
+	repository.RedisClient.Set(repository.Ctx, key, data, ttl)
 }
 
 // ---------------------------------------------------------------------------
-// Cache: groups list (keyed by token — one list per user)
+// Cache: groups list (keyed by user ID — one list per user)
 // ---------------------------------------------------------------------------
 
-type groupListCacheEntry struct {
-	groups    []*gitlab.Group
-	fetchedAt time.Time
-}
-
-var (
-	groupListCache   = map[string]*groupListCacheEntry{}
-	groupListCacheMu sync.RWMutex
-)
-
-func getCachedGroupList(token string) ([]*gitlab.Group, bool) {
-	groupListCacheMu.RLock()
-	defer groupListCacheMu.RUnlock()
-	entry, ok := groupListCache[token]
-	if !ok || time.Since(entry.fetchedAt) > groupListCacheTTL {
+func getCachedGroupList(userID uint) ([]*gitlab.Group, bool) {
+	if repository.RedisClient == nil {
 		return nil, false
 	}
-	return entry.groups, true
+	key := fmt.Sprintf("gitlab_groups_user_%d", userID)
+	val, err := repository.RedisClient.Get(repository.Ctx, key).Result()
+	if err == redis.Nil || err != nil {
+		return nil, false
+	}
+
+	var groups []*gitlab.Group
+	if err := json.Unmarshal([]byte(val), &groups); err != nil {
+		return nil, false
+	}
+	return groups, true
 }
 
-func setCachedGroupList(token string, groups []*gitlab.Group) {
-	groupListCacheMu.Lock()
-	defer groupListCacheMu.Unlock()
-	groupListCache[token] = &groupListCacheEntry{
-		groups:    groups,
-		fetchedAt: time.Now(),
+func setCachedGroupList(userID uint, groups []*gitlab.Group) {
+	if repository.RedisClient == nil {
+		return
 	}
+	key := fmt.Sprintf("gitlab_groups_user_%d", userID)
+	data, err := json.Marshal(groups)
+	if err != nil {
+		return
+	}
+	ttl := time.Duration(config.CacheTTLGroups) * time.Minute
+	repository.RedisClient.Set(repository.Ctx, key, data, ttl)
 }
 
 func ListGroupsHandler(c *gin.Context) {
 	session := sessions.Default(c)
 	token := session.Get("access_token").(string)
+	
+	rawUserID := session.Get("user_id")
+	if rawUserID == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	userID := rawUserID.(uint)
 
-	// Serve from cache (keyed per user token).
-	if cached, ok := getCachedGroupList(token); ok {
+	// Serve from cache (keyed per user ID).
+	if cached, ok := getCachedGroupList(userID); ok {
 		log.Printf("📦 [CACHE] HIT  groups list (%d groups)", len(cached))
 		c.JSON(http.StatusOK, gin.H{"groups": cached})
 		return
@@ -128,9 +132,9 @@ func ListGroupsHandler(c *gin.Context) {
 		opt.Page = resp.NextPage
 	}
 
-	log.Printf("🌐 [CACHE] MISS groups list — fetched %d groups from GitLab, caching for %s",
-		len(allGroups), groupListCacheTTL)
-	setCachedGroupList(token, allGroups)
+	log.Printf("🌐 [CACHE] MISS groups list — fetched %d groups from GitLab, caching for %d minutes",
+		len(allGroups), config.CacheTTLGroups)
+	setCachedGroupList(userID, allGroups)
 
 	c.JSON(http.StatusOK, gin.H{"groups": allGroups})
 }
@@ -180,8 +184,8 @@ func ListGroupProjectsHandler(c *gin.Context) {
 		opt.Page = resp.NextPage
 	}
 
-	log.Printf("🌐 [CACHE] MISS group=%s — fetched %d projects from GitLab, caching for %s",
-		groupID, len(allProjects), groupProjectsCacheTTL)
+	log.Printf("🌐 [CACHE] MISS group=%s — fetched %d projects, caching for %d minutes",
+		groupID, len(allProjects), config.CacheTTLProjects)
 	setCachedGroupProjects(groupID, allProjects)
 
 	c.JSON(http.StatusOK, gin.H{"projects": allProjects})
