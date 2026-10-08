@@ -1,6 +1,16 @@
 version: '3.8'
 
 services:
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "5050:5050"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - gitlab-scanner
+    restart: unless-stopped
+
   gitlab-scanner:
     build: .
     env_file:
@@ -20,6 +30,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+    restart: unless-stopped
     deploy:
       replicas: 3
 
@@ -38,13 +49,15 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      
+    restart: unless-stopped
+
   redis:
     image: redis:8-alpine
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    restart: unless-stopped
 
 volumes:
   db_data:
