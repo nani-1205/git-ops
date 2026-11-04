@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/joho/godotenv"
 	"golang.org/x/oauth2"
@@ -18,6 +19,13 @@ var (
 
 	// DatabaseDSN is the fully assembled PostgreSQL connection string.
 	DatabaseDSN string
+
+	// Redis Config
+	RedisHost         string
+	RedisPort         string
+	RedisPassword     string
+	CacheTTLGroups    int
+	CacheTTLProjects  int
 )
 
 // InsecureHTTPClient is a globally available HTTP client with SSL verification disabled.
@@ -61,6 +69,25 @@ func Load() {
 
 	// ── Database ──────────────────────────────────────────────────────────────
 	DatabaseDSN = buildDSN()
+
+	// ── Redis ─────────────────────────────────────────────────────────────────
+	RedisHost = getEnvOrDefault("REDIS_HOST", "localhost")
+	RedisPort = getEnvOrDefault("REDIS_PORT", "6379")
+	RedisPassword = getEnvOrDefault("REDIS_PASSWORD", "")
+	
+	groupsTTLStr := getEnvOrDefault("CACHE_TTL_GROUPS", "30")
+	if ttl, err := strconv.Atoi(groupsTTLStr); err == nil {
+		CacheTTLGroups = ttl
+	} else {
+		CacheTTLGroups = 30
+	}
+
+	projectsTTLStr := getEnvOrDefault("CACHE_TTL_PROJECTS", "15")
+	if ttl, err := strconv.Atoi(projectsTTLStr); err == nil {
+		CacheTTLProjects = ttl
+	} else {
+		CacheTTLProjects = 15
+	}
 
 	// ── HTTP client (SSL verification disabled) ───────────────────────────────
 	tr := &http.Transport{

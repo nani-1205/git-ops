@@ -14,12 +14,12 @@ func GenerateReport(results []scanner.ScanResult, groupID string) (*gofpdf.Fpdf,
 	tr := pdf.UnicodeTranslatorFromDescriptor("")
 
 	pdf.SetFont("Arial", "B", 16)
-	pdf.Cell(40, 10, tr("GitLab Code Scan Report"))
+	pdf.Cell(40, 10, tr("GIT-OPS Code Scan Report"))
 	pdf.Ln(10)
 
 	pdf.SetFont("Arial", "", 12)
-	pdf.Cell(40, 10, tr(fmt.Sprintf("Group/Subgroup: %s", groupID)))
-	pdf.Ln(8)
+	pdf.MultiCell(0, 6, tr(fmt.Sprintf("Group/Subgroup: %s", groupID)), "", "L", false)
+	pdf.Ln(4)
 	pdf.Cell(40, 10, tr(fmt.Sprintf("Date: %s", time.Now().Format("2006-01-02 15:04:05"))))
 	pdf.Ln(8)
 	pdf.Cell(40, 10, tr(fmt.Sprintf("Total Matches: %d", len(results))))

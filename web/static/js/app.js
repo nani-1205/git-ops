@@ -1,9 +1,35 @@
 document.addEventListener('DOMContentLoaded', () => {
     const loginView = document.getElementById('login-view');
+    const toolHubView = document.getElementById('tool-hub-view');
     const dashboardView = document.getElementById('dashboard-view');
     const btnLogin = document.getElementById('btn-login');
+    const btnBackHub = document.getElementById('btn-back-hub');
     const userNameEl = document.getElementById('user-name');
     const userAvatarEl = document.getElementById('user-avatar');
+
+    // Theme Toggle Logic
+    const savedTheme = localStorage.getItem('theme') || 'dark';
+    const themeSelects = document.querySelectorAll('.theme-select');
+    
+    function applyTheme(theme) {
+        document.body.classList.remove('light-mode', 'mint-mode');
+        if (theme === 'light') document.body.classList.add('light-mode');
+        if (theme === 'mint') document.body.classList.add('mint-mode');
+        localStorage.setItem('theme', theme);
+        
+        // Sync all selects
+        themeSelects.forEach(select => {
+            select.value = theme;
+        });
+    }
+    
+    applyTheme(savedTheme);
+
+    themeSelects.forEach(select => {
+        select.addEventListener('change', (e) => {
+            applyTheme(e.target.value);
+        });
+    });
     
     // Sidebar elements
     const groupList = document.getElementById('group-list');
@@ -26,9 +52,55 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let currentScanRequest = null;
     let lastScanResults = [];
+    let lastJobType = 'scan';
+    let currentTool = 'scanner';
     let selectedGroupIds = new Set();
     let selectedGroupNames = new Set();
     let fetchProjectsDebounceTimer = null;
+
+    function activateTool(targetTool, titleHtml) {
+        currentTool = targetTool;
+        document.getElementById('tool-title').innerHTML = titleHtml;
+        
+        document.getElementById('scanner-fields').classList.add('hidden');
+        document.getElementById('commits-fields').classList.add('hidden');
+        document.getElementById('compare-fields').classList.add('hidden');
+        
+        document.getElementById(`${currentTool}-fields`).classList.remove('hidden');
+        resultsPanel.classList.add('hidden');
+    }
+
+    // Tool Hub interactions — click and keyboard (Enter/Space)
+    document.querySelectorAll('.tool-card').forEach(card => {
+        const handler = () => {
+            const targetTool = card.getAttribute('data-target');
+            const titleHtml = card.querySelector('h3').innerHTML;
+            const iconHtml = card.querySelector('.tool-icon').innerHTML;
+
+            toolHubView.classList.remove('active');
+            dashboardView.classList.add('active');
+
+            localStorage.setItem('activeView', 'dashboard');
+            localStorage.setItem('activeTool', targetTool);
+
+            activateTool(targetTool, iconHtml + ' ' + titleHtml);
+        };
+
+        card.addEventListener('click', handler);
+        card.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                handler();
+            }
+        });
+    });
+
+    // Back to hub
+    btnBackHub.addEventListener('click', () => {
+        dashboardView.classList.remove('active');
+        toolHubView.classList.add('active');
+        localStorage.setItem('activeView', 'hub');
+    });
 
     // Debounce wrapper: waits 300ms after the last checkbox click before fetching.
     function debouncedFetchProjects() {
@@ -47,13 +119,35 @@ document.addEventListener('DOMContentLoaded', () => {
         .then(data => {
             // User is logged in
             userNameEl.textContent = data.username;
+            document.querySelector('.user-name-hub').textContent = data.username;
             if (data.avatar_url) {
                 userAvatarEl.src = data.avatar_url;
+                document.querySelector('.user-avatar-hub').src = data.avatar_url;
             } else {
-                userAvatarEl.src = `https://ui-avatars.com/api/?name=${data.username}&background=random`;
+                const avatarUrl = `https://ui-avatars.com/api/?name=${data.username}&background=random`;
+                userAvatarEl.src = avatarUrl;
+                document.querySelector('.user-avatar-hub').src = avatarUrl;
             }
             loginView.classList.remove('active');
-            dashboardView.classList.add('active');
+            
+            const savedView = localStorage.getItem('activeView') || 'hub';
+            if (savedView === 'dashboard') {
+                const savedTool = localStorage.getItem('activeTool') || 'scanner';
+                const card = document.querySelector(`.tool-card[data-target="${savedTool}"]`);
+                if (card) {
+                    const titleHtml = card.querySelector('h3').innerHTML;
+                    const iconHtml = card.querySelector('.tool-icon').innerHTML;
+                    dashboardView.classList.add('active');
+                    toolHubView.classList.remove('active');
+                    activateTool(savedTool, iconHtml + ' ' + titleHtml);
+                } else {
+                    toolHubView.classList.add('active');
+                    dashboardView.classList.remove('active');
+                }
+            } else {
+                toolHubView.classList.add('active');
+                dashboardView.classList.remove('active');
+            }
             
             // Fetch groups
             fetchGroups();
@@ -61,6 +155,7 @@ document.addEventListener('DOMContentLoaded', () => {
         .catch(() => {
             // Not logged in, stay on login view
             loginView.classList.add('active');
+            toolHubView.classList.remove('active');
             dashboardView.classList.remove('active');
         });
 
@@ -296,46 +391,58 @@ document.addEventListener('DOMContentLoaded', () => {
         
         const checkboxes = document.querySelectorAll('.project-checkbox:checked');
         if (checkboxes.length === 0) {
-            alert('Please select at least one repository to scan.');
+            alert('Please select at least one repository to process.');
             return;
         }
         
         const projectIds = Array.from(checkboxes).map(c => parseInt(c.value));
-        const keywords = document.getElementById('keywords').value.trim();
-        const branch = document.getElementById('branch').value.trim();
         
-        if (!keywords) return;
+        let payload = { project_ids: projectIds };
+        let url = '';
+
+        if (currentTool === 'scanner') {
+            payload.keywords = document.getElementById('keywords').value.trim();
+            payload.branch = document.getElementById('branch').value.trim();
+            url = '/api/scan';
+            if (!payload.keywords) return;
+        } else if (currentTool === 'commits') {
+            payload.branch = document.getElementById('commits-branch').value.trim();
+            payload.start_date = document.getElementById('start-date').value;
+            payload.end_date = document.getElementById('end-date').value;
+            url = '/api/reports/commits';
+            if (!payload.branch || !payload.start_date || !payload.end_date) {
+                alert('Please fill all fields for commit reporter.');
+                return;
+            }
+        } else if (currentTool === 'compare') {
+            payload.source_branch = document.getElementById('source-branch').value.trim();
+            payload.target_branch = document.getElementById('target-branch').value.trim();
+            url = '/api/reports/compare';
+            if (!payload.source_branch || !payload.target_branch) {
+                alert('Please fill all fields for branch compare.');
+                return;
+            }
+        }
 
         currentScanRequest = { 
-            project_ids: projectIds, 
-            keywords: keywords, 
-            branch: branch, 
+            ...payload,
             group_id: Array.from(selectedGroupNames).join(', ') 
         };
 
-        // UI transitions
         scanForm.querySelector('button').disabled = true;
         loadingState.classList.remove('hidden');
         resultsPanel.classList.add('hidden');
         resultsBody.innerHTML = '';
 
-        fetch('/api/scan', {
+        fetch(url, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                project_ids: projectIds,
-                keywords: keywords,
-                branch: branch
-            })
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
         })
         .then(response => {
             if (!response.ok) {
                 return response.json().then(errData => {
                     throw new Error(errData.error || 'Network response was not ok');
-                }).catch(e => {
-                    throw new Error(e.message || 'Network response was not ok');
                 });
             }
             return response.json();
@@ -343,20 +450,14 @@ document.addEventListener('DOMContentLoaded', () => {
         .then(data => {
             if (data.job_id) {
                 const p = loadingState.querySelector('p');
-                if (p) p.textContent = 'Scanning... Job ID: ' + data.job_id;
+                if (p) p.textContent = 'Processing... Job ID: ' + data.job_id;
                 pollJobStatus(data.job_id);
-            } else {
-                lastScanResults = data.results || [];
-                scanForm.querySelector('button').disabled = false;
-                loadingState.classList.add('hidden');
-                resultsPanel.classList.remove('hidden');
-                renderResults(lastScanResults);
             }
         })
         .catch(error => {
             scanForm.querySelector('button').disabled = false;
             loadingState.classList.add('hidden');
-            alert('Scan failed: ' + error.message);
+            alert('Request failed: ' + error.message);
         });
     });
 
@@ -366,14 +467,15 @@ document.addEventListener('DOMContentLoaded', () => {
             .then(data => {
                 if (data.status === 'completed') {
                     lastScanResults = data.results || [];
+                    lastJobType = data.type || 'scan';
                     scanForm.querySelector('button').disabled = false;
                     loadingState.classList.add('hidden');
                     resultsPanel.classList.remove('hidden');
-                    renderResults(lastScanResults);
+                    renderResults(lastScanResults, lastJobType);
                 } else if (data.status === 'failed') {
                     scanForm.querySelector('button').disabled = false;
                     loadingState.classList.add('hidden');
-                    alert('Scan failed: ' + data.error);
+                    alert('Job failed: ' + data.error);
                 } else {
                     setTimeout(() => pollJobStatus(jobId), 2000);
                 }
@@ -381,64 +483,125 @@ document.addEventListener('DOMContentLoaded', () => {
             .catch(error => {
                 scanForm.querySelector('button').disabled = false;
                 loadingState.classList.add('hidden');
-                alert('Failed to check scan status: ' + error.message);
+                alert('Failed to check status: ' + error.message);
             });
     }
 
-    function renderResults(results) {
+    function renderResults(results, jobType) {
         if (results.length === 0) {
             resultsTable.classList.add('hidden');
             noResults.classList.remove('hidden');
-            btnExport.disabled = true;
+            document.getElementById('btn-export-pdf').disabled = true;
+            document.getElementById('btn-export-xlsx').classList.add('hidden');
             return;
         }
 
         resultsTable.classList.remove('hidden');
         noResults.classList.add('hidden');
-        btnExport.disabled = false;
+        document.getElementById('btn-export-pdf').disabled = false;
+        document.getElementById('btn-export-xlsx').disabled = false;
+        
+        if (jobType === 'commits' || jobType === 'compare') {
+            document.getElementById('btn-export-xlsx').classList.remove('hidden');
+        } else {
+            document.getElementById('btn-export-xlsx').classList.add('hidden');
+        }
+
+        const thead = resultsTable.querySelector('thead');
         resultsBody.innerHTML = '';
 
-        results.forEach(res => {
-            const tr = document.createElement('tr');
-            
-            tr.innerHTML = `
-                <td>
-                    <strong>${res.project_name}</strong>
-                </td>
-                <td>
-                    <span style="color: var(--color-accent); font-weight: 500;">${res.keyword_found}</span>
-                </td>
-                <td>
-                    <span class="file-path">${res.filename}</span>
-                    <div class="code-snippet">${escapeHtml(res.line_content)}</div>
-                </td>
-                <td>
-                    <a href="${res.deep_link}" target="_blank" rel="noopener noreferrer" class="action-link">
-                        View File
-                        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-                    </a>
-                </td>
+        if (jobType === 'scan') {
+            thead.innerHTML = `
+                <tr>
+                    <th>Project</th>
+                    <th>Keyword</th>
+                    <th>Context Snippet</th>
+                    <th>Action</th>
+                </tr>
             `;
-            resultsBody.appendChild(tr);
-        });
+            results.forEach(res => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><strong>${res.project_name}</strong></td>
+                    <td><span style="color: var(--color-accent); font-weight: 500;">${res.keyword_found}</span></td>
+                    <td>
+                        <span class="file-path">${res.filename}</span>
+                        <div class="code-snippet">${escapeHtml(res.line_content)}</div>
+                    </td>
+                    <td><a href="${res.deep_link}" target="_blank" class="action-link">View File</a></td>
+                `;
+                resultsBody.appendChild(tr);
+            });
+        } else if (jobType === 'commits') {
+            thead.innerHTML = `
+                <tr>
+                    <th>Project</th>
+                    <th>Author</th>
+                    <th>Date</th>
+                    <th>+ / -</th>
+                    <th>Message</th>
+                </tr>
+            `;
+            results.forEach(res => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><strong>${res.project_name}</strong></td>
+                    <td>${res.author_name}</td>
+                    <td>${res.committed_date}</td>
+                    <td>
+                        <span style="color: green;">+${res.additions}</span> / 
+                        <span style="color: red;">-${res.deletions}</span>
+                    </td>
+                    <td><a href="${res.web_url}" target="_blank" class="action-link">${res.title}</a></td>
+                `;
+                resultsBody.appendChild(tr);
+            });
+        } else if (jobType === 'compare') {
+            thead.innerHTML = `
+                <tr>
+                    <th>Project</th>
+                    <th>Ahead</th>
+                    <th>Behind</th>
+                    <th>Status</th>
+                    <th>+ / -</th>
+                </tr>
+            `;
+            results.forEach(res => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><strong>${res.project_name}</strong></td>
+                    <td>${res.ahead}</td>
+                    <td>${res.behind}</td>
+                    <td><span class="badge ${res.status === 'Up to date' ? 'badge-success' : 'badge-warning'}">${res.status}</span></td>
+                    <td>
+                        <span style="color: green;">+${res.additions}</span> / 
+                        <span style="color: red;">-${res.deletions}</span>
+                    </td>
+                `;
+                resultsBody.appendChild(tr);
+            });
+        }
     }
 
-    btnExport.addEventListener('click', () => {
+    function handleExport(format) {
         if (!currentScanRequest) return;
+        
+        let url = '/api/export';
+        if (lastJobType === 'commits') url = '/api/reports/commits/export';
+        if (lastJobType === 'compare') url = '/api/reports/compare/export';
 
-        // Change button state
-        const originalText = btnExport.innerHTML;
-        btnExport.innerHTML = 'Exporting...';
-        btnExport.disabled = true;
+        const btn = document.getElementById(`btn-export-${format}`);
+        const originalText = btn.innerHTML;
+        btn.innerHTML = 'Exporting...';
+        btn.disabled = true;
 
-        fetch('/api/export', {
+        fetch(url, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 group_id: currentScanRequest.group_id.replace(/\//g, '_'),
-                results: lastScanResults
+                results: lastScanResults,
+                format: format
             })
         })
         .then(response => {
@@ -449,7 +612,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `scan_report_projects.pdf`;
+            a.download = `report_${lastJobType}_${currentScanRequest.group_id.replace(/\//g, '_')}.${format}`;
             document.body.appendChild(a);
             a.click();
             window.URL.revokeObjectURL(url);
@@ -459,10 +622,13 @@ document.addEventListener('DOMContentLoaded', () => {
             alert(error.message);
         })
         .finally(() => {
-            btnExport.innerHTML = originalText;
-            btnExport.disabled = false;
+            btn.innerHTML = originalText;
+            btn.disabled = false;
         });
-    });
+    }
+
+    document.getElementById('btn-export-pdf').addEventListener('click', () => handleExport('pdf'));
+    document.getElementById('btn-export-xlsx').addEventListener('click', () => handleExport('xlsx'));
 
     function escapeHtml(unsafe) {
         return (unsafe || "")

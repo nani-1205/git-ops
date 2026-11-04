@@ -105,11 +105,10 @@ func JobStatusHandler(c *gin.Context) {
 	}
 
 	if job.Status == "completed" {
-		var results []scanner.ScanResult
-		json.Unmarshal([]byte(job.Results), &results)
 		c.JSON(http.StatusOK, gin.H{
 			"status":  job.Status,
-			"results": results,
+			"results": json.RawMessage(job.Results),
+			"type":    job.JobType,
 		})
 	} else if job.Status == "failed" {
 		c.JSON(http.StatusOK, gin.H{

@@ -1,37 +1,41 @@
-# Build stage
+# ── Build stage ────────────────────────────────────────────────────────────────
 FROM golang:1.27-alpine AS builder
 
 WORKDIR /app
 
-# Install git if needed for fetching Go modules
+# Install git (required by some Go modules during download)
 RUN apk add --no-cache git
 
-# Copy go mod and sum files
+# Copy go module files first for better layer caching:
+# dependencies are only re-downloaded when go.mod / go.sum change.
 COPY go.mod go.sum ./
-
-# Download all dependencies. Dependencies will be cached if the go.mod and go.sum files are not changed
 RUN go mod download
 
-# Copy the source code into the container
+# Copy the full source tree
 COPY . .
 
-# Build the Go app
-# Using CGO_ENABLED=0 since glebarez/sqlite is a pure Go SQLite driver
-RUN CGO_ENABLED=0 GOOS=linux go build -o gitlab-scan ./cmd/server
+# Build a statically-linked binary for Linux.
+# CGO_ENABLED=0 produces a self-contained binary with no libc dependency,
+# which is safe to run on Alpine (PostgreSQL driver is pure-Go via pgx).
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o gitlab-scan ./cmd/server
 
-# Final stage
-FROM alpine:latest
+# ── Runtime stage ──────────────────────────────────────────────────────────────
+FROM alpine:3.21
 
-WORKDIR /root/
+# ca-certificates  – required for TLS/HTTPS calls to GitLab (assetgit.com etc.)
+# tzdata           – required so time.LoadLocation("Asia/Kolkata") works correctly
+RUN apk add --no-cache ca-certificates tzdata
 
-# Copy the pre-built binary file from the previous stage
+WORKDIR /app
+
+# Copy the pre-built binary from the builder stage
 COPY --from=builder /app/gitlab-scan .
 
-# Copy the web directory (static files and templates)
+# Copy static assets and HTML templates
 COPY --from=builder /app/web ./web
 
-# Expose port 5050 to the outside world
+# Expose the application port
 EXPOSE 5050
 
-# Command to run the executable
+# Run the application
 CMD ["./gitlab-scan"]
